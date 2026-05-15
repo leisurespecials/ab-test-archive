@@ -1,0 +1,16 @@
+[project]
+name = "ab-test-archive"
+version = "0.1.0"
+description = "Local searchable archive for A/B test Jira work items."
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+ab-archive = "ab_archive.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["ab_archive*"]
+exclude = ["data*", "tests*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
