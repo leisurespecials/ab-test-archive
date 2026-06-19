@@ -83,6 +83,33 @@ def sync_archive(
             db.replace_chunks(report_id, record["key"], chunk_text(page_text))
             synced_reports += 1
 
+        comments = client.get_issue_comments(record["key"])
+        if comments:
+            comment_parts = []
+            for c in comments:
+                author = ((c.get("author") or {}).get("displayName") or "Unknown")
+                date = (c.get("created") or "")[:10]
+                body = adf_to_text(c.get("body"))
+                if body:
+                    comment_parts.append(f"[{author}, {date}]\n{body}")
+            if comment_parts:
+                comments_text = compact_text(*comment_parts)
+                last_updated = max((c.get("updated") or c.get("created") or "") for c in comments)
+                comment_doc_id = db.upsert_document(
+                    {
+                        "test_key": record["key"],
+                        "source_type": "jira_comments",
+                        "source_id": f"{record['key']}:comments",
+                        "source_url": record["jira_url"],
+                        "title": f"{record['summary']} — comments",
+                        "text": comments_text,
+                        "raw_json": json_dumps(comments),
+                        "updated_at": last_updated,
+                    }
+                )
+                db.replace_chunks(comment_doc_id, record["key"], chunk_text(comments_text))
+                log(f"  Stored {len(comment_parts)} comment(s).")
+
         synced_issues += 1
         if synced_issues % 25 == 0:
             db.commit()

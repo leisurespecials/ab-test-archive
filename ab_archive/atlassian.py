@@ -42,6 +42,22 @@ class AtlassianClient:
                 break
             page += 1
 
+    def get_issue_comments(self, key: str) -> list[dict[str, Any]]:
+        comments: list[dict[str, Any]] = []
+        start_at = 0
+        while True:
+            data = self.http.request(
+                "GET",
+                f"/rest/api/3/issue/{key}/comment",
+                params={"startAt": start_at, "maxResults": 100},
+            )
+            batch = data.get("comments") or []
+            comments.extend(batch)
+            if len(comments) >= int(data.get("total", 0)) or not batch:
+                break
+            start_at += len(batch)
+        return comments
+
     def get_confluence_page(self, page_id: str) -> dict[str, Any]:
         data = self.http.request(
             "GET",
