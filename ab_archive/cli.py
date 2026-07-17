@@ -18,6 +18,13 @@ def main(argv: list[str] | None = None) -> int:
 
     sync_parser = sub.add_parser("sync", help="Import/update Jira work items")
     sync_parser.add_argument("--no-embed", action="store_true", help="Skip local embeddings during sync")
+    sync_parser.add_argument(
+        "--pdf-limit",
+        type=int,
+        default=0,
+        help="Max new PDF attachments to download/extract this run (0 = no limit). "
+        "Already-extracted PDFs are always skipped, so repeated runs work through the backlog in batches.",
+    )
 
     search_parser = sub.add_parser("search", help="Search the archive")
     search_parser.add_argument("query")
@@ -43,6 +50,7 @@ def main(argv: list[str] | None = None) -> int:
             issues, reports, embedded = sync_archive(
                 config,
                 embed=not args.no_embed,
+                pdf_limit=args.pdf_limit,
                 progress=lambda message: print(message, flush=True),
             )
         except RuntimeError as exc:

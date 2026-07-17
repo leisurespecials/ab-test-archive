@@ -77,6 +77,18 @@ python3 -m ab_archive sync --no-embed
 python3 -m ab_archive embed
 ```
 
+Older tests that never got a results field or comment sometimes only have their results in a
+PDF report attachment. Sync downloads and extracts text from those automatically, but the first
+run can be slow since there can be over a thousand of them. Work through the backlog in batches
+instead of one long run:
+
+```bash
+python3 -m ab_archive sync --pdf-limit 100
+```
+
+Already-extracted PDFs are skipped on later runs, so re-running the same command keeps making
+progress through the backlog.
+
 ## Data
 
 The default database is `data/ab_archive.sqlite`. No Jira or Confluence data is sent to a cloud LLM. Jira and Confluence are only read during sync; answers and embeddings use your local Ollama instance.

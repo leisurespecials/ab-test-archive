@@ -25,6 +25,7 @@ def sync_archive(
     config: Config,
     *,
     embed: bool = True,
+    pdf_limit: int = 0,
     progress: Callable[[str], None] | None = None,
 ) -> tuple[int, int, int]:
     def log(message: str) -> None:
@@ -38,6 +39,8 @@ def sync_archive(
     client = AtlassianClient(config.jira_base_url, config.jira_email, config.jira_api_token)
     synced_issues = 0
     synced_reports = 0
+    synced_pdfs = 0
+    pdf_limit_reached = False
 
     log("Starting Jira sync for project AB / work type AB Test / final statuses only.")
     for issue in client.iter_ab_test_issues(progress=log):
@@ -117,7 +120,7 @@ def sync_archive(
         # no actual results in them, and requiring comments to be empty too would skip
         # PDF extraction on exactly the tests it's meant to cover.
         has_results_text = bool(record["results"]) or bool(record["learnings"])
-        if not has_results_text:
+        if not has_results_text and not pdf_limit_reached:
             pdf_attachments = select_pdf_attachments((issue.get("fields") or {}).get("attachment"))
             # Results/learnings never fill in retroactively for these old issues, so once an
             # attachment is parsed there is nothing to gain by re-downloading and re-running
@@ -164,6 +167,11 @@ def sync_archive(
                 db.replace_chunks(attachment_doc_id, record["key"], chunk_text(pdf_text))
                 log(f"    Extracted {len(pdf_text)} characters from {filename} ({coverage}).")
                 synced_reports += 1
+                synced_pdfs += 1
+                if pdf_limit and synced_pdfs >= pdf_limit:
+                    pdf_limit_reached = True
+                    log(f"  Reached --pdf-limit of {pdf_limit}; skipping PDF extraction for the rest of this run.")
+                    break
 
         synced_issues += 1
         if synced_issues % 25 == 0:
@@ -179,7 +187,10 @@ def sync_archive(
             log(f"Skipped embeddings: {exc}")
     db.commit()
     db.close()
-    log(f"Finished sync: {synced_issues} Jira work items, {synced_reports} Confluence reports, {embedded} embeddings.")
+    log(
+        f"Finished sync: {synced_issues} Jira work items, {synced_reports} Confluence reports, "
+        f"{synced_pdfs} PDF attachments extracted, {embedded} embeddings."
+    )
     return synced_issues, synced_reports, embedded
 
 
