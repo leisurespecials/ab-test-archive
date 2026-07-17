@@ -2,6 +2,7 @@ import unittest
 
 from ab_archive.text import (
     adf_to_text,
+    compact_text,
     extract_confluence_page_ids,
     infer_market,
     infer_page_type,
@@ -53,6 +54,12 @@ class TextTests(unittest.TestCase):
 
     def test_select_pdf_attachments_handles_none(self):
         self.assertEqual(select_pdf_attachments(None), [])
+
+    def test_compact_text_strips_embedded_nul_bytes(self):
+        # pdfplumber/pypdf can decode an unmapped PDF font ligature (e.g. "ffi") to a NUL
+        # byte. SQLite's length() truncates at an embedded NUL, so leaving one in would
+        # make diagnostics misleading even though the full string is stored correctly.
+        self.assertEqual(compact_text("a\x00ffiliate 4,729 164"), "affiliate 4,729 164")
 
 
 if __name__ == "__main__":

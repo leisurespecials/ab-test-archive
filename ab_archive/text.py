@@ -247,7 +247,12 @@ def _label_control_variation(page) -> list[str]:
 
 
 def _clean(text: str) -> str:
-    return re.sub(r"\n{3,}", "\n\n", re.sub(r"[ \t]+", " ", text or "")).strip()
+    # PDF font ligatures pdfplumber/pypdf can't map (e.g. "ffi", "fi") sometimes decode
+    # to a NUL byte instead of being dropped. SQLite's length() truncates at an embedded
+    # NUL even though the full string is stored correctly, which makes diagnostics
+    # misleading, and a stray NUL mid-word can fragment it for keyword search.
+    text = (text or "").replace("\x00", "")
+    return re.sub(r"\n{3,}", "\n\n", re.sub(r"[ \t]+", " ", text)).strip()
 
 
 class _HTMLTextParser(HTMLParser):
