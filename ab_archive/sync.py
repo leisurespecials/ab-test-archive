@@ -16,6 +16,8 @@ from .text import (
     extract_confluence_page_ids,
     infer_market,
     infer_page_type,
+    pdf_to_text,
+    select_pdf_attachments,
 )
 
 
@@ -84,8 +86,8 @@ def sync_archive(
             synced_reports += 1
 
         comments = client.get_issue_comments(record["key"])
+        comment_parts = []
         if comments:
-            comment_parts = []
             for c in comments:
                 author = ((c.get("author") or {}).get("displayName") or "Unknown")
                 date = (c.get("created") or "")[:10]
@@ -109,6 +111,59 @@ def sync_archive(
                 )
                 db.replace_chunks(comment_doc_id, record["key"], chunk_text(comments_text))
                 log(f"  Stored {len(comment_parts)} comment(s).")
+
+        # Gate on the results/learnings fields only, not on comment presence: many old
+        # issues carry general discussion comments (assignments, process chatter) with
+        # no actual results in them, and requiring comments to be empty too would skip
+        # PDF extraction on exactly the tests it's meant to cover.
+        has_results_text = bool(record["results"]) or bool(record["learnings"])
+        if not has_results_text:
+            pdf_attachments = select_pdf_attachments((issue.get("fields") or {}).get("attachment"))
+            # Results/learnings never fill in retroactively for these old issues, so once an
+            # attachment is parsed there is nothing to gain by re-downloading and re-running
+            # pdfplumber on it every sync.
+            pdf_attachments = [
+                a for a in pdf_attachments
+                if not db.document_exists(record["key"], "jira_attachment_pdf", str(a.get("id")))
+            ]
+            if pdf_attachments:
+                log(f"  No results text found; extracting {len(pdf_attachments)} PDF attachment(s).")
+            for attachment in pdf_attachments:
+                filename = attachment.get("filename") or f"attachment-{attachment.get('id')}"
+                content_url = attachment.get("content")
+                if not content_url:
+                    continue
+                try:
+                    pdf_bytes = client.get_attachment_bytes(content_url)
+                    pdf_text, labeled = pdf_to_text(pdf_bytes)
+                except Exception as exc:
+                    log(f"    Could not extract {filename}: {exc}")
+                    continue
+                if not pdf_text.strip():
+                    log(f"    {filename}: no extractable text (likely a scanned/image PDF).")
+                    continue
+                coverage = "with labeled Control/Variation breakdown" if labeled else "plain text only, no Control/Variation layout detected"
+                attachment_doc_id = db.upsert_document(
+                    {
+                        "test_key": record["key"],
+                        "source_type": "jira_attachment_pdf",
+                        "source_id": str(attachment.get("id")),
+                        "source_url": content_url,
+                        "title": f"{record['summary']} — {filename}",
+                        "text": pdf_text,
+                        "raw_json": json_dumps(
+                            {
+                                "filename": filename,
+                                "mimeType": attachment.get("mimeType"),
+                                "size": attachment.get("size"),
+                            }
+                        ),
+                        "updated_at": attachment.get("created"),
+                    }
+                )
+                db.replace_chunks(attachment_doc_id, record["key"], chunk_text(pdf_text))
+                log(f"    Extracted {len(pdf_text)} characters from {filename} ({coverage}).")
+                synced_reports += 1
 
         synced_issues += 1
         if synced_issues % 25 == 0:

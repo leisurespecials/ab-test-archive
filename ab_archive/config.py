@@ -21,6 +21,7 @@ JIRA_FIELDS = [
     "labels",
     "description",
     "resolution",
+    "attachment",
     "customfield_10601",  # Hypothesis
     "customfield_10602",  # Start Date
     "customfield_10603",  # End Date

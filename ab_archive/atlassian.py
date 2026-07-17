@@ -78,6 +78,9 @@ class AtlassianClient:
         data["_archive_text"] = text
         return data
 
+    def get_attachment_bytes(self, content_url: str) -> bytes:
+        return self.http.download(content_url)
+
 
 def issue_web_url(base_url: str, key: str) -> str:
     return f"{base_url.rstrip('/')}/browse/{key}"

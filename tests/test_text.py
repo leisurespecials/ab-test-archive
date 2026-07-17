@@ -1,6 +1,12 @@
 import unittest
 
-from ab_archive.text import adf_to_text, extract_confluence_page_ids, infer_market, infer_page_type
+from ab_archive.text import (
+    adf_to_text,
+    extract_confluence_page_ids,
+    infer_market,
+    infer_page_type,
+    select_pdf_attachments,
+)
 
 
 class TextTests(unittest.TestCase):
@@ -34,6 +40,19 @@ class TextTests(unittest.TestCase):
         self.assertEqual(infer_market(summary), "HSNL")
         self.assertEqual(infer_page_type(summary, ""), "property")
         self.assertEqual(infer_page_type("HSDE - Funnel - Show extras", ""), "funnel")
+
+    def test_select_pdf_attachments_filters_by_mime_and_extension(self):
+        attachments = [
+            {"id": "1", "filename": "results.pdf", "mimeType": "application/octet-stream"},
+            {"id": "2", "filename": "screenshot.png", "mimeType": "image/png"},
+            {"id": "3", "filename": "report.PDF", "mimeType": "application/pdf"},
+            {"id": "4", "filename": "notes.txt", "mimeType": "text/plain"},
+        ]
+        selected = select_pdf_attachments(attachments)
+        self.assertEqual([a["id"] for a in selected], ["1", "3"])
+
+    def test_select_pdf_attachments_handles_none(self):
+        self.assertEqual(select_pdf_attachments(None), [])
 
 
 if __name__ == "__main__":

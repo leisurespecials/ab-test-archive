@@ -59,6 +59,53 @@ class DBTests(unittest.TestCase):
             self.assertEqual(db.stats()["outcome"], [("Successful", 1)])
             db.close()
 
+    def test_document_exists_reflects_upserts(self):
+        with TemporaryDirectory() as tmp:
+            db = ArchiveDB(Path(tmp) / "archive.sqlite")
+            db.migrate()
+            db.upsert_test(
+                {
+                    "key": "AB-1",
+                    "issue_id": "1",
+                    "summary": "HSNL - Property - Tooltip",
+                    "status": "Successful",
+                    "status_category": "Done",
+                    "outcome": "Successful",
+                    "hypothesis": "",
+                    "results": "",
+                    "learnings": "",
+                    "kpi": "",
+                    "description": "",
+                    "start_date": None,
+                    "end_date": None,
+                    "created": "",
+                    "updated": "",
+                    "labels_json": "[]",
+                    "jira_url": "https://x/browse/AB-1",
+                    "confluence_urls_json": "[]",
+                    "market": "HSNL",
+                    "page_type": "property",
+                    "raw_json": "{}",
+                    "synced_at": "now",
+                }
+            )
+            self.assertFalse(db.document_exists("AB-1", "jira_attachment_pdf", "999"))
+            db.upsert_document(
+                {
+                    "test_key": "AB-1",
+                    "source_type": "jira_attachment_pdf",
+                    "source_id": "999",
+                    "source_url": "https://x/attachment/999",
+                    "title": "results.pdf",
+                    "text": "extracted pdf text",
+                    "raw_json": "{}",
+                    "updated_at": "",
+                }
+            )
+            self.assertTrue(db.document_exists("AB-1", "jira_attachment_pdf", "999"))
+            self.assertFalse(db.document_exists("AB-1", "jira_attachment_pdf", "other-id"))
+            db.close()
+
 
 if __name__ == "__main__":
     unittest.main()

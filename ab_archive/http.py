@@ -46,3 +46,18 @@ class HttpClient:
         if not payload:
             return None
         return json.loads(payload.decode("utf-8"))
+
+    def download(self, url: str, *, timeout: int = 60) -> bytes:
+        headers = {}
+        if self.email and self.token:
+            raw = f"{self.email}:{self.token}".encode("utf-8")
+            headers["Authorization"] = "Basic " + b64encode(raw).decode("ascii")
+        req = Request(url, method="GET", headers=headers)
+        try:
+            with urlopen(req, timeout=timeout) as response:
+                return response.read()
+        except HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"GET {url} failed with {exc.code}: {detail}") from exc
+        except URLError as exc:
+            raise RuntimeError(f"GET {url} failed: {exc.reason}") from exc

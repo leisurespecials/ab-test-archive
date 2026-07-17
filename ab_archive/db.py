@@ -180,6 +180,13 @@ class ArchiveDB:
             values,
         )
 
+    def document_exists(self, test_key: str, source_type: str, source_id: str) -> bool:
+        row = self.conn.execute(
+            "SELECT 1 FROM documents WHERE test_key=? AND source_type=? AND source_id=? LIMIT 1",
+            (test_key, source_type, source_id),
+        ).fetchone()
+        return row is not None
+
     def upsert_document(self, record: dict[str, Any]) -> int:
         self.conn.execute(
             """
