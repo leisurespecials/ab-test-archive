@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import argparse
 from collections import OrderedDict
+from pathlib import Path
 import sys
 
 from .config import Config
 from .db import ArchiveDB
+from .export import export_archive
+from .publish import publish_archive
 from .ollama import OllamaClient
 from .retrieval import embed_missing, hybrid_search
 from .schedule import SYNC_HOUR, SYNC_MINUTE, install_schedule, remove_schedule, schedule_status
@@ -18,6 +21,9 @@ def main(argv: list[str] | None = None) -> int:
 
     sync_parser = sub.add_parser("sync", help="Import/update Jira work items")
     sync_parser.add_argument("--no-embed", action="store_true", help="Skip local embeddings during sync")
+    sync_parser.add_argument(
+        "--no-publish", action="store_true", help="Skip pushing the text export to the data repo after sync"
+    )
     sync_parser.add_argument(
         "--pdf-limit",
         type=int,
@@ -39,6 +45,11 @@ def main(argv: list[str] | None = None) -> int:
     embed_parser = sub.add_parser("embed", help="Embed any unembedded chunks")
     embed_parser.add_argument("--limit", type=int, default=0, help="Reserved for future batching")
 
+    export_parser = sub.add_parser("export", help="Write a text export (one JSON file per test, no embeddings)")
+    export_parser.add_argument("out_dir", help="Directory to write into, e.g. a clone of the data repo")
+
+    sub.add_parser("publish", help="Export and push the archive to the data repo")
+
     schedule_parser = sub.add_parser("schedule", help="Manage daily scheduled sync")
     schedule_parser.add_argument("action", choices=["install", "remove", "status"])
 
@@ -57,6 +68,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Sync failed: {exc}", file=sys.stderr)
             return 1
         print(f"Synced {issues} Jira work items, {reports} Confluence reports, {embedded} embeddings.")
+        if not args.no_publish:
+            # Never fail the sync over the push: the local archive is already updated.
+            try:
+                db = _open_db(config)
+                publish_archive(db, progress=lambda message: print(message, flush=True))
+                db.close()
+            except Exception as exc:
+                print(f"Publish failed (sync itself succeeded): {exc}", file=sys.stderr)
         return 0
 
     if args.command == "search":
@@ -106,6 +125,24 @@ def main(argv: list[str] | None = None) -> int:
         count = embed_missing(db, ollama)
         print(f"Embedded {count} chunks.")
         db.close()
+        return 0
+
+    if args.command == "export":
+        db = _open_db(config)
+        tests, changed, removed = export_archive(db, Path(args.out_dir).expanduser())
+        db.close()
+        print(f"Exported {tests} tests: {changed} files changed, {removed} removed.")
+        return 0
+
+    if args.command == "publish":
+        db = _open_db(config)
+        try:
+            publish_archive(db, progress=lambda message: print(message, flush=True))
+        except RuntimeError as exc:
+            print(f"Publish failed: {exc}", file=sys.stderr)
+            return 1
+        finally:
+            db.close()
         return 0
 
     if args.command == "schedule":
