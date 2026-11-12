@@ -5,6 +5,7 @@ import json
 from mcp.server.mcpserver import MCPServer
 
 from .config import Config
+from .metrics import parse_results
 from .db import DERIVED_COLUMNS, GROUP_EXPRESSIONS, ArchiveDB
 from .ollama import OllamaClient
 from .retrieval import hybrid_search
@@ -62,6 +63,7 @@ def get_test(key: str) -> dict:
         db.close()
     test = {k: row[k] for k in row.keys() if k not in ("raw_json", "labels_json", "confluence_urls_json")}
     test["labels"] = json.loads(row["labels_json"] or "[]")
+    test["metrics"] = parse_results(row["results"])
     test["documents"] = [dict(d) for d in docs]
     return test
 
@@ -127,6 +129,63 @@ def aggregate_tests(
         return [{"error": str(e)}]
     finally:
         db.close()
+
+
+_RANK_METRICS = ("cr_change_pct", "rpo_change_pct", "revenue_change_pct", "confidence_pct")
+
+
+@mcp.tool()
+def rank_tests(
+    metric: str = "cr_change_pct",
+    order: str = "desc",
+    market: str | None = None,
+    page_type: str | None = None,
+    year: int | None = None,
+    winners_only: bool = False,
+    min_confidence: float | None = None,
+    limit: int = 20,
+) -> dict:
+    """Rank tests by a result number parsed from the report text: cr_change_pct, rpo_change_pct,
+    revenue_change_pct (relative % change, variation vs control) or confidence_pct. order is "desc"
+    (biggest uplift first) or "asc" (biggest drop first). Numbers exist only for tests whose results
+    text states them (mostly 2024+: roughly 12% have a CR change, ~5% revenue, ~1% RPO), so "coverage"
+    in the response says how many tests were rankable. confidence_pct is the figure quoted in the
+    report; confidence_favors says whether it was for the variation or the control. Each row also
+    carries control_cr_pct / variation_cr_pct when stated."""
+    if metric not in _RANK_METRICS:
+        return {"error": f"unknown metric {metric!r}; choose from {list(_RANK_METRICS)}"}
+    clauses, params = ["results IS NOT NULL AND results <> ''"], []
+    if winners_only:
+        clauses.append("status IN ('Successful', 'Implemented')")
+    for column, value in (("market", market), ("page_type", page_type)):
+        if value:
+            clauses.append(f"{column} = ? COLLATE NOCASE")
+            params.append(value)
+    if year is not None:
+        clauses.append(f"{GROUP_EXPRESSIONS['year']} = ?")
+        params.append(year)
+    db = _open()
+    try:
+        rows = db.conn.execute(
+            f"SELECT key, summary, status, market, page_type, results, {DERIVED_COLUMNS} FROM tests WHERE {' AND '.join(clauses)}",
+            params,
+        ).fetchall()
+    finally:
+        db.close()
+    ranked = []
+    for r in rows:
+        m = parse_results(r["results"])
+        if m[metric] is None:
+            continue
+        if min_confidence is not None and (m["confidence_pct"] is None or m["confidence_pct"] < min_confidence):
+            continue
+        ranked.append({
+            "key": r["key"], "summary": r["summary"], "status": r["status"], "market": r["market"],
+            "page_type": r["page_type"], "year": r["year"], "is_winner": bool(r["is_winner"]),
+            **{k: v for k, v in m.items() if v is not None},
+        })
+    ranked.sort(key=lambda t: t[metric], reverse=order.lower() != "asc")
+    return {"metric": metric, "coverage": len(ranked), "tests_with_results_text": len(rows), "tests": ranked[:limit]}
 
 
 @mcp.tool()
