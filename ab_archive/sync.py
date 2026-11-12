@@ -9,6 +9,7 @@ from typing import Any
 from .atlassian import AtlassianClient, issue_web_url, json_dumps, page_web_url
 from .config import Config
 from .db import ArchiveDB
+from .distill import distill_missing
 from .retrieval import chunk_text, embed_missing
 from .ollama import OllamaClient
 from .text import (
@@ -65,10 +66,13 @@ def sync_archive(
     started = datetime.now(timezone.utc)
 
     def finish_embeddings() -> int:
+        ollama = OllamaClient(config.ollama_base_url, config.ollama_chat_model, config.ollama_embed_model)
+        # Only touches tests without a hypothesis that are new or changed, so this is quick
+        # after the first run. `embed=False` means "no local model": ideas are still stored.
+        distill_missing(db, ollama if embed else None, progress=log)
         if not embed:
             return 0
         try:
-            ollama = OllamaClient(config.ollama_base_url, config.ollama_chat_model, config.ollama_embed_model)
             return embed_missing(db, ollama, progress=log)
         except RuntimeError as exc:
             log(f"Skipped embeddings: {exc}")

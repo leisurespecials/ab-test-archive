@@ -186,6 +186,12 @@ class ArchiveDB:
             JOIN tests t ON t.key = c.test_key;
             """
         )
+        # Added after the first release; filled by `distill` for tests without a hypothesis.
+        # Not part of upsert_test, so a re-sync of the ticket leaves them in place.
+        existing = {row["name"] for row in self.conn.execute("PRAGMA table_info(tests)")}
+        for column in ("idea", "idea_reason", "idea_stamp"):
+            if column not in existing:
+                self.conn.execute(f"ALTER TABLE tests ADD COLUMN {column} TEXT NOT NULL DEFAULT ''")
         self.conn.commit()
 
     def upsert_test(self, record: dict[str, Any]) -> None:
@@ -228,6 +234,32 @@ class ArchiveDB:
             "ON CONFLICT(name) DO UPDATE SET value=excluded.value",
             (name, value),
         )
+
+    def tests_needing_idea(self, version: str, *, redo: bool = False) -> list[sqlite3.Row]:
+        """Tests without a hypothesis whose idea is missing or stale (ticket or rules changed)."""
+        clause = "" if redo else "AND idea_stamp <> (? || '|' || COALESCE(updated, ''))"
+        params = () if redo else (version,)
+        return self.conn.execute(
+            f"""
+            SELECT key, summary, description, updated FROM tests
+            WHERE COALESCE(hypothesis, '') = '' {clause}
+            ORDER BY updated DESC
+            """,
+            params,
+        ).fetchall()
+
+    def set_idea(self, key: str, idea: str, reason: str, stamp: str) -> None:
+        self.conn.execute(
+            "UPDATE tests SET idea=?, idea_reason=?, idea_stamp=? WHERE key=?",
+            (idea, reason, stamp, key),
+        )
+
+    def clear_ideas_where_hypothesis_exists(self) -> int:
+        cursor = self.conn.execute(
+            "UPDATE tests SET idea='', idea_reason='', idea_stamp='' "
+            "WHERE COALESCE(hypothesis, '') <> '' AND (idea <> '' OR idea_reason <> '' OR idea_stamp <> '')"
+        )
+        return cursor.rowcount
 
     def document_exists(self, test_key: str, source_type: str, source_id: str) -> bool:
         row = self.conn.execute(

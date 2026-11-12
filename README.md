@@ -85,6 +85,25 @@ Each run first lists every work item in scope with its Jira `updated` stamp, the
 
 Lines starting with `WARNING:` in `data/sync.log` list anything that was skipped.
 
+### Tests without a hypothesis
+
+Many older tickets (mostly 2019-2024) never had the Hypothesis field filled in. For those, sync
+stores two extra fields, both taken literally from the ticket so they can be trusted:
+
+- `idea` - what was changed and where: the change named in the title plus the "Trigger on" rules.
+  Assembled by code, no model involved.
+- `idea_reason` - why the change was made, quoted from the description. The local Ollama model
+  only points at the sentences; a quote is kept only if it occurs word for word in the ticket,
+  is prose rather than a rule or list item, and reads like a reason.
+
+An empty `idea_reason` means the ticket does not say why. Nothing is guessed or reconstructed,
+and tickets that do have a hypothesis are left alone. To run it by hand:
+
+```bash
+python3 -m ab_archive distill            # new or changed tickets only
+python3 -m ab_archive distill --redo     # everything again
+```
+
 For a faster first import, you can skip embeddings and add them later:
 
 ```bash

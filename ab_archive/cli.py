@@ -7,6 +7,7 @@ import sys
 
 from .config import Config
 from .db import ArchiveDB
+from .distill import distill_missing
 from .export import export_archive
 from .publish import publish_archive
 from .ollama import OllamaClient
@@ -47,6 +48,13 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("stats", help="Show archive stats")
 
+    distill_parser = sub.add_parser(
+        "distill", help="Distil the idea (and quoted reason) for tests that have no hypothesis"
+    )
+    distill_parser.add_argument("--limit", type=int, default=0, help="Only process this many tests")
+    distill_parser.add_argument("--redo", action="store_true", help="Redo tests that were already distilled")
+    distill_parser.add_argument("--no-model", action="store_true", help="Skip the local model (no reasons)")
+
     embed_parser = sub.add_parser("embed", help="Embed any unembedded chunks")
     embed_parser.add_argument("--limit", type=int, default=0, help="Reserved for future batching")
 
@@ -82,6 +90,18 @@ def main(argv: list[str] | None = None) -> int:
                 db.close()
             except Exception as exc:
                 print(f"Publish failed (sync itself succeeded): {exc}", file=sys.stderr)
+        return 0
+
+    if args.command == "distill":
+        db = _open_db(config)
+        ollama = None
+        if not args.no_model:
+            ollama = OllamaClient(config.ollama_base_url, config.ollama_chat_model, config.ollama_embed_model)
+        ideas, reasons = distill_missing(
+            db, ollama, limit=args.limit, redo=args.redo, progress=lambda message: print(message, flush=True)
+        )
+        db.close()
+        print(f"Stored {ideas} ideas, {reasons} with a reason quoted from the ticket.")
         return 0
 
     if args.command == "search":

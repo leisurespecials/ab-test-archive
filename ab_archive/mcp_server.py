@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 
 from mcp.server.mcpserver import MCPServer
 
@@ -14,14 +15,19 @@ mcp = MCPServer("ab-archive")
 
 _config = Config.from_env()
 _TEST_COLUMNS = (
-    "key, summary, status, outcome, market, page_type, kpi, start_date, end_date, jira_url, " + DERIVED_COLUMNS
+    "key, summary, status, outcome, market, page_type, kpi, start_date, end_date, jira_url, "
+    "(hypothesis <> '') AS has_hypothesis, idea, idea_reason, " + DERIVED_COLUMNS
 )
 _COMPACT_COLUMNS = "key, status, market, page_type, start_date, end_date, " + DERIVED_COLUMNS
 
 
 def _open() -> ArchiveDB:
     db = ArchiveDB(_config.db_path)
-    db.conn.execute("PRAGMA query_only = ON")  # the sync job is the only writer
+    try:
+        db.migrate()  # adds columns a newer version expects; a no-op once the sync has run
+    except sqlite3.OperationalError:
+        pass  # locked by a running sync, which migrates anyway
+    db.conn.execute("PRAGMA query_only = ON")  # apart from that, the sync job is the only writer
     return db
 
 
@@ -49,7 +55,10 @@ def search_tests(query: str, limit: int = 8) -> list[dict]:
 
 @mcp.tool()
 def get_test(key: str) -> dict:
-    """Get one archived test by Jira key (e.g. AB-2655): hypothesis, results, learnings, KPI, and linked report text."""
+    """Get one archived test by Jira key (e.g. AB-2655): hypothesis, results, learnings, KPI, and linked report text.
+    When `hypothesis` is empty the ticket never had one. `idea` then says what was changed and where
+    (taken literally from the ticket) and `idea_reason` quotes the ticket's own explanation of why, if it
+    gave one. An empty `idea_reason` means the ticket does not say why: do not present a guess as fact."""
     db = _open()
     try:
         row = db.conn.execute("SELECT * FROM tests WHERE key = ?", (key.upper(),)).fetchone()
@@ -61,7 +70,11 @@ def get_test(key: str) -> dict:
         ).fetchall()
     finally:
         db.close()
-    test = {k: row[k] for k in row.keys() if k not in ("raw_json", "labels_json", "confluence_urls_json")}
+    test = {
+        k: row[k]
+        for k in row.keys()
+        if k not in ("raw_json", "labels_json", "confluence_urls_json", "idea_stamp")
+    }
     test["labels"] = json.loads(row["labels_json"] or "[]")
     test["metrics"] = parse_results(row["results"])
     test["documents"] = [dict(d) for d in docs]
@@ -84,7 +97,9 @@ def list_tests(
     (from end date, else start date, else created) and winners_only. "Successful" and "Implemented"
     are treated as the same (both winners) and match either status. Every row has is_winner, year,
     quarter and period_source (which date the year/quarter came from). Page with offset; compact=true
-    returns only key, status, market, page_type, dates and the derived fields."""
+    returns only key, status, market, page_type, dates and the derived fields. For tests without a
+    written hypothesis (has_hypothesis = 0), `idea` gives the change and its scope in the ticket's own
+    words and `idea_reason` quotes the ticket's stated reason when there is one."""
     clauses, params = [], []
     if winners_only or (status and status.lower() in ("successful", "implemented")):
         clauses.append("status IN ('Successful', 'Implemented')")
@@ -106,7 +121,13 @@ def list_tests(
         ).fetchall()
     finally:
         db.close()
-    return [{**dict(r), "is_winner": bool(r["is_winner"])} for r in rows]
+    out = []
+    for r in rows:
+        d = {**dict(r), "is_winner": bool(r["is_winner"])}
+        if "has_hypothesis" in d:
+            d["has_hypothesis"] = bool(d["has_hypothesis"])
+        out.append(d)
+    return out
 
 
 @mcp.tool()

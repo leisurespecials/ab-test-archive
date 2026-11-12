@@ -8,7 +8,7 @@ from .db import ArchiveDB
 TEST_FIELDS = [
     "key", "summary", "status", "outcome", "hypothesis", "results", "learnings", "kpi",
     "description", "start_date", "end_date", "created", "updated", "jira_url",
-    "market", "page_type",
+    "market", "page_type", "idea", "idea_reason",
 ]
 
 
