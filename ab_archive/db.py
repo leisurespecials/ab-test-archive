@@ -18,6 +18,33 @@ class SearchResult:
     score: float
 
 
+WINNER_STATUSES = ("Successful", "Implemented")
+
+# Best available date for a test: end date, else start date, else Jira created.
+_PERIOD_DATE = "COALESCE(NULLIF(end_date, ''), NULLIF(start_date, ''), NULLIF(created, ''))"
+_PERIOD_SOURCE = (
+    "CASE WHEN NULLIF(end_date, '') IS NOT NULL THEN 'end_date' "
+    "WHEN NULLIF(start_date, '') IS NOT NULL THEN 'start_date' "
+    "WHEN NULLIF(created, '') IS NOT NULL THEN 'created' ELSE NULL END"
+)
+_YEAR = f"CAST(substr({_PERIOD_DATE}, 1, 4) AS INTEGER)"
+_QUARTER = f"((CAST(substr({_PERIOD_DATE}, 6, 2) AS INTEGER) + 2) / 3)"
+_IS_WINNER = "(status IN ('Successful', 'Implemented'))"
+
+# SQL select fragment adding derived fields to a tests row.
+DERIVED_COLUMNS = (
+    f"{_IS_WINNER} AS is_winner, {_YEAR} AS year, {_QUARTER} AS quarter, {_PERIOD_SOURCE} AS period_source"
+)
+
+GROUP_EXPRESSIONS = {
+    "year": _YEAR,
+    "quarter": f"printf('%d-Q%d', {_YEAR}, {_QUARTER})",
+    "market": "COALESCE(NULLIF(market, ''), '(unknown)')",
+    "page_type": "COALESCE(NULLIF(page_type, ''), '(unknown)')",
+    "outcome": "CASE WHEN status IN ('Successful', 'Implemented') THEN 'Successful' ELSE status END",
+}
+
+
 class ArchiveDB:
     def __init__(self, path: Path):
         self.path = path
@@ -357,6 +384,51 @@ class ArchiveDB:
                 counts[label] = counts.get(label, 0) + 1
         result["labels"] = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
         return result
+
+    def aggregate(
+        self,
+        group_by: list[str],
+        market: str | None = None,
+        page_type: str | None = None,
+        year: int | None = None,
+        outcome: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Count tests per group with winner count and win rate (winners / total)."""
+        for g in group_by:
+            if g not in GROUP_EXPRESSIONS:
+                raise ValueError(f"unknown group_by {g!r}; choose from {sorted(GROUP_EXPRESSIONS)}")
+        clauses, params = [], []
+        for column, value in (("market", market), ("page_type", page_type)):
+            if value:
+                clauses.append(f"{column} = ? COLLATE NOCASE")
+                params.append(value)
+        if year is not None:
+            clauses.append(f"{_YEAR} = ?")
+            params.append(year)
+        if outcome:
+            if outcome.lower() in ("successful", "implemented", "winner"):
+                clauses.append(_IS_WINNER)
+            else:
+                clauses.append("status = ? COLLATE NOCASE")
+                params.append(outcome)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        select = ", ".join(f"{GROUP_EXPRESSIONS[g]} AS {g}" for g in group_by)
+        select = f"{select}, " if select else ""
+        group = f"GROUP BY {', '.join(str(i + 1) for i in range(len(group_by)))} ORDER BY {', '.join(str(i + 1) for i in range(len(group_by)))}" if group_by else ""
+        rows = self.conn.execute(
+            f"""
+            SELECT {select}COUNT(*) AS total, SUM({_IS_WINNER}) AS winners
+            FROM tests {where} {group}
+            """,
+            params,
+        ).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["winners"] = int(d["winners"] or 0)
+            d["win_rate"] = round(d["winners"] / d["total"], 3) if d["total"] else None
+            out.append(d)
+        return out
 
     def commit(self) -> None:
         self.conn.commit()

@@ -5,14 +5,17 @@ import json
 from mcp.server.mcpserver import MCPServer
 
 from .config import Config
-from .db import ArchiveDB
+from .db import DERIVED_COLUMNS, GROUP_EXPRESSIONS, ArchiveDB
 from .ollama import OllamaClient
 from .retrieval import hybrid_search
 
 mcp = MCPServer("ab-archive")
 
 _config = Config.from_env()
-_TEST_COLUMNS = "key, summary, status, outcome, market, page_type, kpi, start_date, end_date, jira_url"
+_TEST_COLUMNS = (
+    "key, summary, status, outcome, market, page_type, kpi, start_date, end_date, jira_url, " + DERIVED_COLUMNS
+)
+_COMPACT_COLUMNS = "key, status, market, page_type, start_date, end_date, " + DERIVED_COLUMNS
 
 
 def _open() -> ArchiveDB:
@@ -68,28 +71,62 @@ def list_tests(
     status: str | None = None,
     market: str | None = None,
     page_type: str | None = None,
+    year: int | None = None,
+    winners_only: bool = False,
     limit: int = 25,
+    offset: int = 0,
+    compact: bool = False,
 ) -> list[dict]:
-    """List archived tests, newest first, filtered by status (Successful, Implemented, Unsuccessful,
-    No significant Result), market (e.g. HSNL) and/or page_type (e.g. checkout, property, funnel).
-    "Successful" and "Implemented" are treated as the same (both are winners) and match either status."""
+    """List archived tests, newest first. Filters: status (Successful, Implemented, Unsuccessful,
+    No significant Result), market (e.g. HSNL), page_type (e.g. checkout, property, funnel), year
+    (from end date, else start date, else created) and winners_only. "Successful" and "Implemented"
+    are treated as the same (both winners) and match either status. Every row has is_winner, year,
+    quarter and period_source (which date the year/quarter came from). Page with offset; compact=true
+    returns only key, status, market, page_type, dates and the derived fields."""
     clauses, params = [], []
-    if status and status.lower() in ("successful", "implemented"):
+    if winners_only or (status and status.lower() in ("successful", "implemented")):
         clauses.append("status IN ('Successful', 'Implemented')")
         status = None
     for column, value in (("status", status), ("market", market), ("page_type", page_type)):
         if value:
             clauses.append(f"{column} = ? COLLATE NOCASE")
             params.append(value)
+    if year is not None:
+        clauses.append(f"{GROUP_EXPRESSIONS['year']} = ?")
+        params.append(year)
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    columns = _COMPACT_COLUMNS if compact else _TEST_COLUMNS
     db = _open()
     try:
         rows = db.conn.execute(
-            f"SELECT {_TEST_COLUMNS} FROM tests {where} ORDER BY updated DESC LIMIT ?", (*params, limit)
+            f"SELECT {columns} FROM tests {where} ORDER BY updated DESC LIMIT ? OFFSET ?",
+            (*params, limit, max(offset, 0)),
         ).fetchall()
     finally:
         db.close()
-    return [dict(r) for r in rows]
+    return [{**dict(r), "is_winner": bool(r["is_winner"])} for r in rows]
+
+
+@mcp.tool()
+def aggregate_tests(
+    group_by: list[str] | None = None,
+    market: str | None = None,
+    page_type: str | None = None,
+    year: int | None = None,
+    outcome: str | None = None,
+) -> list[dict]:
+    """Count tests grouped by any of: year, quarter, market, page_type, outcome. Each group returns
+    total, winners (Successful + Implemented) and win_rate (winners/total). Optional filters: market,
+    page_type, year, outcome ("winner"/"Successful"/"Implemented" = winners, or Unsuccessful /
+    No significant Result). Year/quarter come from end date, else start date, else created.
+    Example: group_by=["year"] gives winning tests per year; group_by=["market","page_type"] a matrix."""
+    db = _open()
+    try:
+        return db.aggregate(group_by or [], market=market, page_type=page_type, year=year, outcome=outcome)
+    except ValueError as e:
+        return [{"error": str(e)}]
+    finally:
+        db.close()
 
 
 @mcp.tool()
