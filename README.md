@@ -70,6 +70,21 @@ Processing AB-2895 [Successful]: HSNL - Property - Improve usability of total pr
 Saved progress: 25 Jira work items, 7 Confluence reports.
 ```
 
+### How sync keeps up to date
+
+Each run first lists every work item in scope with its Jira `updated` stamp, then:
+
+- fetches only the items that are new or changed since they were last stored;
+- re-fetches everything once a week (or on demand with `sync --full`), because an edit to a
+  linked Confluence report does not change the Jira work item;
+- removes archived tests that are no longer in scope, e.g. moved to `Dismissed`. If more than
+  20% of the archive would disappear at once, nothing is removed and a warning is logged;
+- retries rate limits, server errors and network errors with backoff. If one work item still
+  fails it is skipped without storing anything partial and picked up again on the next run,
+  so a single bad response no longer stops the whole sync.
+
+Lines starting with `WARNING:` in `data/sync.log` list anything that was skipped.
+
 For a faster first import, you can skip embeddings and add them later:
 
 ```bash

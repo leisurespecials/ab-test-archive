@@ -20,6 +20,11 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
 
     sync_parser = sub.add_parser("sync", help="Import/update Jira work items")
+    sync_parser.add_argument(
+        "--full",
+        action="store_true",
+        help="Re-fetch every work item instead of only new/changed ones (also happens automatically once a week)",
+    )
     sync_parser.add_argument("--no-embed", action="store_true", help="Skip local embeddings during sync")
     sync_parser.add_argument(
         "--no-publish", action="store_true", help="Skip pushing the text export to the data repo after sync"
@@ -62,6 +67,7 @@ def main(argv: list[str] | None = None) -> int:
                 config,
                 embed=not args.no_embed,
                 pdf_limit=args.pdf_limit,
+                full=args.full,
                 progress=lambda message: print(message, flush=True),
             )
         except RuntimeError as exc:

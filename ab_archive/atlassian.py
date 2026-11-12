@@ -18,19 +18,44 @@ class AtlassianClient:
     def __post_init__(self) -> None:
         self.http = HttpClient(self.base_url, self.email, self.token)
 
-    def iter_ab_test_issues(self, progress: Callable[[str], None] | None = None) -> Iterator[dict[str, Any]]:
+    def iter_scope_index(self, progress: Callable[[str], None] | None = None) -> Iterator[tuple[str, str]]:
+        """Yield (key, updated) for every work item in scope, without the heavy fields.
+
+        Cheap enough to run on every sync; it tells the sync which items changed since
+        they were last stored and which ones have left the scope.
+        """
+        for issue in self._search(JQL_SCOPE + " ORDER BY updated DESC", ["updated"], progress, "scope index"):
+            yield issue["key"], (issue.get("fields") or {}).get("updated") or ""
+
+    def iter_ab_test_issues(
+        self,
+        progress: Callable[[str], None] | None = None,
+        keys: list[str] | None = None,
+    ) -> Iterator[dict[str, Any]]:
+        """Yield full work items: everything in scope, or only `keys` when given."""
+        if keys is None:
+            yield from self._search(JQL_SCOPE + " ORDER BY updated DESC", JIRA_FIELDS, progress, "Jira")
+            return
+        for start in range(0, len(keys), 100):
+            batch = keys[start : start + 100]
+            jql = f"{JQL_SCOPE} AND key in ({', '.join(batch)}) ORDER BY updated DESC"
+            yield from self._search(jql, JIRA_FIELDS, progress, "Jira")
+
+    def _search(
+        self,
+        jql: str,
+        fields: list[str],
+        progress: Callable[[str], None] | None,
+        label: str,
+    ) -> Iterator[dict[str, Any]]:
         token: str | None = None
         page = 1
         while True:
-            body: dict[str, Any] = {
-                "jql": JQL_SCOPE + " ORDER BY updated DESC",
-                "maxResults": 100,
-                "fields": JIRA_FIELDS,
-            }
+            body: dict[str, Any] = {"jql": jql, "maxResults": 100, "fields": fields}
             if token:
                 body["nextPageToken"] = token
             if progress:
-                progress(f"Fetching Jira page {page}...")
+                progress(f"Fetching {label} page {page}...")
             data = self.http.request("POST", "/rest/api/3/search/jql", body=body)
             issues = data.get("issues", [])
             if progress:

@@ -207,6 +207,28 @@ class ArchiveDB:
             values,
         )
 
+    def test_updated_map(self) -> dict[str, str]:
+        """Jira `updated` stamp per stored test, to tell which ones changed since last sync."""
+        return {
+            row["key"]: row["updated"] or ""
+            for row in self.conn.execute("SELECT key, updated FROM tests").fetchall()
+        }
+
+    def delete_test(self, key: str) -> None:
+        """Remove a test with its documents and chunks (cascades; triggers clean the FTS index)."""
+        self.conn.execute("DELETE FROM tests WHERE key=?", (key,))
+
+    def get_state(self, name: str) -> str | None:
+        row = self.conn.execute("SELECT value FROM sync_state WHERE name=?", (name,)).fetchone()
+        return row["value"] if row else None
+
+    def set_state(self, name: str, value: str) -> None:
+        self.conn.execute(
+            "INSERT INTO sync_state(name, value) VALUES (?, ?) "
+            "ON CONFLICT(name) DO UPDATE SET value=excluded.value",
+            (name, value),
+        )
+
     def document_exists(self, test_key: str, source_type: str, source_id: str) -> bool:
         row = self.conn.execute(
             "SELECT 1 FROM documents WHERE test_key=? AND source_type=? AND source_id=? LIMIT 1",
