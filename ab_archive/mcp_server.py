@@ -71,8 +71,12 @@ def list_tests(
     limit: int = 25,
 ) -> list[dict]:
     """List archived tests, newest first, filtered by status (Successful, Implemented, Unsuccessful,
-    No significant Result), market (e.g. HSNL) and/or page_type (e.g. checkout, property, funnel)."""
+    No significant Result), market (e.g. HSNL) and/or page_type (e.g. checkout, property, funnel).
+    "Successful" and "Implemented" are treated as the same (both are winners) and match either status."""
     clauses, params = [], []
+    if status and status.lower() in ("successful", "implemented"):
+        clauses.append("status IN ('Successful', 'Implemented')")
+        status = None
     for column, value in (("status", status), ("market", market), ("page_type", page_type)):
         if value:
             clauses.append(f"{column} = ? COLLATE NOCASE")

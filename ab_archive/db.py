@@ -339,7 +339,8 @@ class ArchiveDB:
             """
             SELECT
                 CASE
-                    WHEN status IN ('Successful', 'Implemented', 'Unsuccessful', 'No significant Result') THEN status
+                    WHEN status IN ('Successful', 'Implemented') THEN 'Successful'
+                    WHEN status IN ('Unsuccessful', 'No significant Result') THEN status
                     ELSE '(unknown)'
                 END AS name,
                 COUNT(*) AS count
