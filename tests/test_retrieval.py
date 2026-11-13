@@ -39,6 +39,11 @@ class RetrievalTests(unittest.TestCase):
         self.assertEqual(db.metadata_calls[0]["statuses"], ["Successful", "Implemented"])
         self.assertEqual(db.metadata_calls[0]["page_type"], "property")
 
+    def test_checkout_queries_look_in_funnel_tests(self):
+        db = EmptyDB()
+        hybrid_search(db, "which checkout tests were unsuccessful", None)
+        self.assertEqual(db.metadata_calls[0]["page_type"], "funnel")
+
 
 if __name__ == "__main__":
     unittest.main()

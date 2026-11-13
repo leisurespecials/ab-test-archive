@@ -261,6 +261,21 @@ class ArchiveDB:
         )
         return cursor.rowcount
 
+    def refresh_page_types(self, infer) -> int:
+        """Recompute `page_type` for every stored test from its title and description.
+
+        Sync only rewrites tests whose ticket changed, so a fix to the page rules would
+        otherwise reach old tests a week later at best. Returns how many rows changed.
+        """
+        changed = 0
+        rows = self.conn.execute("SELECT key, summary, description, page_type FROM tests").fetchall()
+        for row in rows:
+            page_type = infer(row["summary"] or "", row["description"] or "")
+            if page_type != (row["page_type"] or ""):
+                self.conn.execute("UPDATE tests SET page_type=? WHERE key=?", (page_type, row["key"]))
+                changed += 1
+        return changed
+
     def document_exists(self, test_key: str, source_type: str, source_id: str) -> bool:
         row = self.conn.execute(
             "SELECT 1 FROM documents WHERE test_key=? AND source_type=? AND source_id=? LIMIT 1",

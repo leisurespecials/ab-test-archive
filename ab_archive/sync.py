@@ -115,6 +115,9 @@ def sync_archive(
             log(f"WARNING: could not fetch {len(missed)} work item(s), will retry next run: {exc}")
 
     removed = _prune_out_of_scope(db, local, index, log)
+    retagged = db.refresh_page_types(infer_page_type)
+    if retagged:
+        log(f"Corrected the page type of {retagged} stored test(s).")
     if full:
         db.set_state("last_full_sync", started.isoformat())
     db.set_state("last_sync", started.isoformat())

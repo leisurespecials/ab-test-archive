@@ -42,6 +42,31 @@ class TextTests(unittest.TestCase):
         self.assertEqual(infer_page_type(summary, ""), "property")
         self.assertEqual(infer_page_type("HSDE - Funnel - Show extras", ""), "funnel")
 
+    def test_page_in_title_wins_over_pages_mentioned_in_description(self):
+        description = "In the detail overlay and booking overlay, like we do in funnel step 1 and checkout."
+        self.assertEqual(infer_page_type("HSNL - Property - Improve total price tooltip", description), "property")
+        self.assertEqual(infer_page_type("HSNL - Search - Merge filter controls", "Shown on lister pages"), "search")
+        self.assertEqual(infer_page_type("HSNL - Website - Add link", "hotel page and funnel"), "website")
+
+    def test_older_title_spellings_map_to_the_same_pages(self):
+        cases = {
+            "BSNL - Desktop Property Page - X y": "property",
+            "BSNL - Mobile Parkpage - X y": "property",
+            "FSDE - Mobile Search & Action - X y": "search",
+            "HSNL - Funnel step 1 - X y": "funnel",
+            "HSNL - Search and lister - X y": "search",
+            "BSNL - Mobile Homepage - X y": "homepage",
+            "HSNL - All pages - X y": "website",
+            "HSNL - Booking calendar - X y": "booking calendar",
+            "HSNL – Property – X y": "property",
+        }
+        for summary, expected in cases.items():
+            self.assertEqual(infer_page_type(summary, "funnel checkout"), expected, summary)
+
+    def test_description_is_used_only_when_title_names_no_page(self):
+        self.assertEqual(infer_page_type("Show breakfast more prominently", "On the hotel page"), "property")
+        self.assertEqual(infer_page_type("Nieuwe test", ""), "")
+
     def test_select_pdf_attachments_filters_by_mime_and_extension(self):
         attachments = [
             {"id": "1", "filename": "results.pdf", "mimeType": "application/octet-stream"},

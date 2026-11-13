@@ -21,6 +21,13 @@ _TEST_COLUMNS = (
 _COMPACT_COLUMNS = "key, status, market, page_type, start_date, end_date, " + DERIVED_COLUMNS
 
 
+def _page(page_type: str | None) -> str | None:
+    """Page types follow the ticket titles, where the checkout pages are called Funnel."""
+    if page_type and page_type.strip().lower() == "checkout":
+        return "funnel"
+    return page_type
+
+
 def _open() -> ArchiveDB:
     db = ArchiveDB(_config.db_path)
     try:
@@ -93,13 +100,15 @@ def list_tests(
     compact: bool = False,
 ) -> list[dict]:
     """List archived tests, newest first. Filters: status (Successful, Implemented, Unsuccessful,
-    No significant Result), market (e.g. HSNL), page_type (e.g. checkout, property, funnel), year
+    No significant Result), market (e.g. HSNL), page_type (the page named in the ticket title: property,
+    search, funnel, lister, homepage, campaign or website; checkout tests are filed as funnel), year
     (from end date, else start date, else created) and winners_only. "Successful" and "Implemented"
     are treated as the same (both winners) and match either status. Every row has is_winner, year,
     quarter and period_source (which date the year/quarter came from). Page with offset; compact=true
     returns only key, status, market, page_type, dates and the derived fields. For tests without a
     written hypothesis (has_hypothesis = 0), `idea` gives the change and its scope in the ticket's own
     words and `idea_reason` quotes the ticket's stated reason when there is one."""
+    page_type = _page(page_type)
     clauses, params = [], []
     if winners_only or (status and status.lower() in ("successful", "implemented")):
         clauses.append("status IN ('Successful', 'Implemented')")
@@ -142,10 +151,12 @@ def aggregate_tests(
     total, winners (Successful + Implemented) and win_rate (winners/total). Optional filters: market,
     page_type, year, outcome ("winner"/"Successful"/"Implemented" = winners, or Unsuccessful /
     No significant Result). Year/quarter come from end date, else start date, else created.
-    Example: group_by=["year"] gives winning tests per year; group_by=["market","page_type"] a matrix."""
+    Example: group_by=["year"] gives winning tests per year; group_by=["market","page_type"] a matrix.
+    page_type is the page named in the ticket title (property, search, funnel, lister, homepage, campaign,
+    website); checkout tests are filed as funnel."""
     db = _open()
     try:
-        return db.aggregate(group_by or [], market=market, page_type=page_type, year=year, outcome=outcome)
+        return db.aggregate(group_by or [], market=market, page_type=_page(page_type), year=year, outcome=outcome)
     except ValueError as e:
         return [{"error": str(e)}]
     finally:
@@ -175,6 +186,7 @@ def rank_tests(
     carries control_cr_pct / variation_cr_pct when stated."""
     if metric not in _RANK_METRICS:
         return {"error": f"unknown metric {metric!r}; choose from {list(_RANK_METRICS)}"}
+    page_type = _page(page_type)
     clauses, params = ["results IS NOT NULL AND results <> ''"], []
     if winners_only:
         clauses.append("status IN ('Successful', 'Implemented')")

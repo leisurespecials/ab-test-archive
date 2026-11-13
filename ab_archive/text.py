@@ -90,7 +90,43 @@ def infer_market(summary: str) -> str:
     return match.group(1) if match else ""
 
 
+# Page names the team uses in the "MARKET - Page - Change" title, with older spellings.
+_PAGE_ALIASES = [
+    ("checkout", ["checkout"]),
+    ("funnel", ["funnel"]),
+    ("property", ["property", "hotel", "park", "product", "accommodation"]),
+    ("search", ["search"]),
+    ("lister", ["lister"]),
+    ("campaign", ["campaign"]),
+    ("homepage", ["homepage", "home page", "home"]),
+    ("website", ["website", "all pages"]),
+]
+_DEVICE_WORDS = re.compile(r"\b(mobile|desktop|tablet)\b", re.I)
+
+
 def infer_page_type(summary: str, description: str) -> str:
+    """Page a test ran on. The page named in the title wins; the description is only used
+    when the title names none.
+
+    The description routinely mentions other pages ("we already show this in the funnel",
+    "booking overlay"), so matching keywords in it filed Property and Search tests as funnel.
+    """
+    parts = re.split(r"\s+[-–]\s+", (summary or "").strip())
+    if len(parts) >= 3:
+        segment = parts[1].strip().lower()
+        if segment == "all":
+            return "website"
+        # When the title names several pages ("Search and lister"), the first one counts.
+        found = [
+            (segment.index(needle), page)
+            for page, needles in _PAGE_ALIASES
+            for needle in needles
+            if needle in segment
+        ]
+        if found:
+            return min(found)[1]
+        return " ".join(_DEVICE_WORDS.sub(" ", segment).split())
+
     haystack = f"{summary} {description}".lower()
     candidates = [
         ("checkout", ["checkout"]),
@@ -104,8 +140,7 @@ def infer_page_type(summary: str, description: str) -> str:
     for page_type, needles in candidates:
         if any(needle in haystack for needle in needles):
             return page_type
-    parts = [part.strip().lower() for part in (summary or "").split("-")]
-    return parts[1] if len(parts) > 2 else ""
+    return ""
 
 
 def compact_text(*parts: str) -> str:

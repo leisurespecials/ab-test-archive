@@ -59,6 +59,23 @@ class DBTests(unittest.TestCase):
             self.assertEqual(db.stats()["outcome"], [("Successful", 1)])
             db.close()
 
+    def test_refresh_page_types_corrects_stored_rows(self):
+        from ab_archive.text import infer_page_type
+
+        with TemporaryDirectory() as tmp:
+            db = ArchiveDB(Path(tmp) / "archive.sqlite")
+            db.migrate()
+            db.conn.execute(
+                "INSERT INTO tests(key, summary, status, description, jira_url, raw_json, synced_at, page_type) "
+                "VALUES ('AB-1', 'HSNL - Property - Tooltip', 'Successful', 'see funnel step 1', 'u', '{}', 'now', 'funnel'), "
+                "('AB-2', 'HSNL - Funnel - Extras', 'Successful', '', 'u', '{}', 'now', 'funnel')"
+            )
+            self.assertEqual(db.refresh_page_types(infer_page_type), 1)
+            self.assertEqual(db.refresh_page_types(infer_page_type), 0)
+            pages = dict(db.conn.execute("SELECT key, page_type FROM tests").fetchall())
+            self.assertEqual(pages, {"AB-1": "property", "AB-2": "funnel"})
+            db.close()
+
     def test_document_exists_reflects_upserts(self):
         with TemporaryDirectory() as tmp:
             db = ArchiveDB(Path(tmp) / "archive.sqlite")

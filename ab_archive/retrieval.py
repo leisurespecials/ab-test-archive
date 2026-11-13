@@ -141,6 +141,8 @@ def _metadata_results(db: ArchiveDB, query: str, limit: int) -> list[SearchResul
             break
     if "hotel page" in text:
         page_type = "property"
+    if page_type == "checkout":
+        page_type = "funnel"  # tickets name the checkout pages "Funnel"; no test is filed as checkout
 
     market = None
     for candidate in re.findall(r"\b[A-Z]{2,6}\b", query):
